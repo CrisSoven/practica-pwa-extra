@@ -1,0 +1,21 @@
+{
+  "name": "Práctica PWA Extra",
+  "short_name": "PWA Extra",
+  "description": "Práctica PWA Extra",
+  "icons": [
+    {
+      "src": "./images/image.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "images/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "start_url": "./index.html",
+  "display": "fullscreen",
+  "theme_color": "#764ABC",
+  "background_color": "#764ABC"
+}

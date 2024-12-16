@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pwa Extraordinarioxd</title>
+    <link rel="manifest" href="manifest.json" />
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+    <link rel="manifest" href="manifest.json" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pouchdb/7.0.0/pouchdb.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  </head>
+
+  <body>
+    <div class="container mt-4">
+      <h3>Agregar edificio</h3>
+      <form id="form" onsubmit="addBulding(event)">
+        <div class="mb-3">
+          <input
+            type="text"
+            id="buildingName"
+            class="form-control"
+            placeholder="nombre del edificio"
+            required
+          />
+        </div>
+        <button type="submit" class="btn btn-success">Guardar</button>
+      </form>
+
+      <div id="buildingList" class="list-group mt-4"></div>
+    </div>
+    <script>
+      if (navigator.serviceWorker) {
+        navigator.serviceWorker.register("./sw.js").then(() => {
+          if (Notification.permission !== "granted") {
+            Notification.requestPermission();
+          }
+        });
+      }
+
+      const db = new PouchDB("buildingsDB_request");
+      const dbLocal = PouchDB("buildingsDB_offline");
+
+      const form = document.getElementById("form");
+      const buildingName = document.getElementById("buildingName");
+      const buildingListElement = document.getElementById("buildingList");
+
+      const apiURL = "http://localhost:8080/api-clean/building";
+
+      const isOnline = () => navigator.onLine;
+
+      const getBuildings = async () => {
+        if (isOnline()) {
+          try {
+            const response = await fetch(`${apiURL}/getAllActive`);
+            const data = await response.json();
+
+            if (data.data) {
+              data.data.forEach(async (building) => {
+                try {
+                  const existingDoc = await dbLocal.get(building.id);
+
+                  await dbLocal.put({
+                    _id: existingDoc._id,
+                    _rev: existingDoc._rev,
+                    name: building.name,
+                  });
+                } catch (error) {
+                  if (error.status === 404) {
+                    await dbLocal.put({
+                      _id: building.id,
+                      name: building.name,
+                    });
+                  } else {
+                    console.error(
+                      "Error al guardar el edificio localmente",
+                      error
+                    );
+                  }
+                }
+              });
+            }
+
+            loadBuildings(data.data || []);
+          } catch (error) {
+            console.error("Error al obtener los edificios", error);
+            showErrorAlert("Error al obtener los edificios");
+          }
+        } else {
+          try {
+            const localBuildings = await dbLocal.allDocs({
+              include_docs: true,
+            });
+            const offlineBuildings = localBuildings.rows.map(
+              (building) => building.doc
+            );
+            loadBuildings(offlineBuildings);
+          } catch (error) {
+            console.error("Error al obtener los edificios local", error);
+            showErrorAlert("Error al obtener los edificios local");
+          }
+        }
+      };
+
+      const loadBuildings = (buildings) => {
+        buildingListElement.innerHTML = "";
+
+        buildings.forEach((building) => {
+          const buildingItem = document.createElement("div");
+          buildingItem.className =
+            "list-group-item d-flex justify-content-between align-items-center";
+          buildingItem.innerHTML = `
+            <span>${building.name}</span>
+            <div>
+              <button class="btn btn-warning btn-sm me-2" onclick="editBuilding('${building.id}')">Editar</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteBuilding('${building.id}')">Eliminar</button>
+            </div>
+          `;
+          buildingListElement.appendChild(buildingItem);
+        });
+      };
+
+      const addBulding = async (event) => {
+        event.preventDefault();
+
+        const newBuilding = {
+          name: buildingName.value,
+        };
+
+        if (isOnline()) {
+          try {
+            const response = await fetch(`${apiURL}/create`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(newBuilding),
+            });
+
+            if (response.ok) {
+              showSuccessAlert("Edificio creado correctamente");
+              resetForm();
+              getBuildings();
+            } else {
+              showErrorAlert("Error al crear el edificio");
+            }
+          } catch (error) {
+            console.error("Error al crear el edificio", error);
+            showErrorAlert("Error al crear el edificio");
+          }
+        } else {
+          try {
+            await saveFailedRequest("POST", newBuilding);
+            resetForm();
+            showErrorAlert("Edificio guardado en cola");
+            getBuildings();
+          } catch (error) {
+            showErrorAlert("Error al guardar el edificio en cola");
+          }
+        }
+      };
+
+      const editBuilding = async (id) => {
+        const { value: newName } = await Swal.fire({
+          title: "Editar edificio",
+          input: "text",
+          inputLabel: "Nuevo nombre",
+          inputValue: "",
+          showCancelButton: true,
+        });
+
+        if (newName) {
+          if (isOnline()) {
+            try {
+              const response = await fetch(`${apiURL}/update`, {
+                method: "PUT",
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ id: id, name: newName }),
+              });
+
+              if (response.ok) {
+                showSuccessAlert("Edificio actualizado correctamente");
+                getBuildings();
+              } else {
+                showErrorAlert("Error al actualizar el edificio");
+              }
+            } catch (error) {
+              console.error("Error al actualizar el edificio", error);
+              showErrorAlert("Error al actualizar el edificio");
+            }
+          } else {
+            showErrorAlert("Modo offline: No se puede editar el edificio");
+          }
+        }
+      };
+
+      const deleteBuilding = async (id) => {
+        const confirmation = await Swal.fire({
+          title: "¿Estás seguro?",
+          text: "No podrás revertir esta acción",
+          icon: "warning",
+          showCancelButton: true,
+          confirmButtonText: "Sí, eliminar",
+        });
+
+        if (confirmation.isConfirmed) {
+          if (isOnline()) {
+            try {
+              const response = await fetch(`${apiURL}/changeStatus/${id}`, {
+                method: "PUT",
+              });
+
+              if (response.ok) {
+                showSuccessAlert("Edificio eliminado correctamente");
+                getBuildings();
+              } else {
+                showErrorAlert("Error al eliminar el edificio");
+              }
+            } catch (error) {
+              console.error("Error al eliminar el edificio", error);
+              showErrorAlert("Error al eliminar el edificio");
+            }
+          } else {
+            showErrorAlert("Modo offline: No se puede eliminar el edificio");
+          }
+        }
+      };
+
+      const saveFailedRequest = async (method, data) => {
+        await db.put({
+          _id: new Date().toISOString(),
+          status: "pending",
+          method,
+          data,
+        });
+      };
+
+      const showSuccessAlert = (message) => {
+        Swal.fire({
+          icon: "success",
+          title: "¡Éxito!",
+          text: message,
+        });
+      };
+
+      const showErrorAlert = (message) => {
+        Swal.fire({
+          icon: "error",
+          title: "¡Error!",
+          text: message,
+        });
+      };
+
+      const resetForm = () => {
+        buildingName.value = "";
+      };
+
+      document.addEventListener("DOMContentLoaded", getBuildings);
+    </script>
+  </body>
+</html>
